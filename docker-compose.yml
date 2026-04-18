@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  lockinbot:
+    build: .
+    container_name: lockinbot
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env

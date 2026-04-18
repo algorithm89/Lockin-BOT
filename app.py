@@ -94,6 +94,9 @@ def incoming_sms():
         schedule_followup(phone, minutes)
         logger.info(f"⏰ Scheduled follow-up for {phone} in {minutes} minutes")
 
+    # Strip any remaining tags (PROFILE is handled in bot.py but just in case)
+    reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
+
     logger.info(f"📤 Reply to {phone}: \"{reply_text}\"")
 
     resp = MessagingResponse()

@@ -47,9 +47,16 @@ def init_db():
             phone VARCHAR(20) PRIMARY KEY,
             name VARCHAR(100),
             timezone VARCHAR(50) DEFAULT 'America/Montreal',
+            profile TEXT DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Add profile column if upgrading from older version
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN profile TEXT DEFAULT NULL")
+    except Exception:
+        pass  # Column already exists
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS goals (
@@ -157,4 +164,28 @@ def get_user_timezone(phone: str) -> str | None:
     cur.close()
     conn.close()
     return row["timezone"] if row and row["timezone"] else None
+
+
+def get_user_profile(phone: str) -> str | None:
+    """Get the user's personalized profile."""
+    conn = get_db()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT profile FROM users WHERE phone = %s", (phone,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row["profile"] if row and row["profile"] else None
+
+
+def update_user_profile(phone: str, profile: str):
+    """Update the user's personalized profile."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET profile = %s WHERE phone = %s", (profile, phone))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+
 

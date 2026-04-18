@@ -1,0 +1,26 @@
+name: Deploy LockIn Bot
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, lockinbot]
+    steps:
+      - name: Pull latest code
+        run: |
+          cd ~/Lockin-BOT
+          git pull origin main
+
+      - name: Rebuild and restart
+        run: |
+          cd ~/Lockin-BOT
+          docker compose down
+          docker compose up -d --build
+
+      - name: Show logs
+        run: docker logs lockinbot --tail 20
+
+
+
