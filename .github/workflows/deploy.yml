@@ -8,14 +8,11 @@ jobs:
   deploy:
     runs-on: [self-hosted, lockinbot]
     steps:
-      - name: Pull latest code
-        run: |
-          cd ~/Lockin-BOT
-          git pull origin main
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Create .env from secrets
+      - name: Create .env
         run: |
-          cd ~/Lockin-BOT
           echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" > .env
           echo "DB_HOST=${{ secrets.DB_HOST }}" >> .env
           echo "DB_PORT=${{ secrets.DB_PORT }}" >> .env
@@ -27,26 +24,19 @@ jobs:
           echo "TWILIO_PHONE_NUMBER=${{ secrets.TWILIO_PHONE_NUMBER }}" >> .env
           echo "MY_PHONE_NUMBER=${{ secrets.MY_PHONE_NUMBER }}" >> .env
 
-      - name: Rebuild and restart
+      - name: Deploy
         run: |
-          cd ~/Lockin-BOT
-          docker compose down
+          docker compose down || true
           docker compose up -d --build
 
       - name: Cleanup .env
         if: always()
-        run: rm -f ~/Lockin-BOT/.env
-
-      - name: Show logs
-        run: docker logs lockinbot --tail 20
+        run: rm -f .env
 
       - name: Test connections
         run: |
           sleep 5
           docker exec lockinbot python test_connections.py
 
-
-
-
-
-
+      - name: Show logs
+        run: docker logs lockinbot --tail 20
