@@ -6,6 +6,7 @@ apscheduler==3.11.0
 mysql-connector-python==9.4.0
 gunicorn==23.0.0
 requests==2.32.3
+pyTelegramBotAPI==4.25.0
 
 
 

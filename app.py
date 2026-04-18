@@ -29,8 +29,12 @@ from scheduler import start_scheduler, get_scheduler
 app = Flask(__name__)
 tts_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 twilio_client = TwilioClient(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
-TWILIO_FROM_SMS = os.getenv("TWILIO_PHONE_NUMBER")
-TWILIO_FROM_WA  = f"whatsapp:{os.getenv('TWILIO_PHONE_NUMBER')}"
+TWILIO_FROM = os.getenv("TWILIO_PHONE_NUMBER")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+
+# ── Telegram Bot ──
+import telebot
+tg_bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=True) if TELEGRAM_TOKEN else None
 
 
 # Directory to store generated TTS audio files
@@ -61,21 +65,16 @@ def detect_checkin(text: str) -> str | None:
 @app.route("/sms", methods=["POST"])
 def incoming_sms():
     """Acknowledge Twilio immediately, process and reply in background."""
-    raw_from = request.form.get("From", "")
+    phone = request.form.get("From", "")
     body = request.form.get("Body", "").strip()
 
-    # Detect WhatsApp vs SMS
-    is_whatsapp = raw_from.startswith("whatsapp:")
-    phone = raw_from.replace("whatsapp:", "") if is_whatsapp else raw_from
-    channel = "WhatsApp" if is_whatsapp else "SMS"
-
-    logger.info(f"📩 {channel} from {phone}: \"{body}\"")
+    logger.info(f"📩 SMS from {phone}: \"{body}\"")
 
     # Process in background thread so Twilio never times out
     import threading
     threading.Thread(
         target=_process_and_reply,
-        args=(phone, body, is_whatsapp),
+        args=(phone, body),
         daemon=True,
     ).start()
 
@@ -84,11 +83,8 @@ def incoming_sms():
     return str(resp), 200, {"Content-Type": "application/xml"}
 
 
-def _process_and_reply(phone: str, body: str, is_whatsapp: bool = False):
+def _process_and_reply(phone: str, body: str):
     """Background: generate AI response and send via Twilio API."""
-    from_num = TWILIO_FROM_WA if is_whatsapp else TWILIO_FROM_SMS
-    to_num = f"whatsapp:{phone}" if is_whatsapp else phone
-    channel = "WhatsApp" if is_whatsapp else "SMS"
     try:
         ensure_user(phone)
 
@@ -107,35 +103,35 @@ def _process_and_reply(phone: str, body: str, is_whatsapp: bool = False):
         if remind_match:
             minutes = int(remind_match.group(1))
             reply_text = re.sub(r'\s*\[REMIND:\d+\]', '', reply_text).strip()
-            schedule_followup(phone, minutes, is_whatsapp)
+            schedule_followup(phone, minutes)
             logger.info(f"⏰ Scheduled follow-up for {phone} in {minutes} minutes")
 
         # Strip any remaining tags
         reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
 
-        logger.info(f"📤 {channel} reply to {phone}: \"{reply_text}\"")
+        logger.info(f"📤 Reply to {phone}: \"{reply_text}\"")
 
         # Send reply via Twilio API (not TwiML)
         twilio_client.messages.create(
             body=reply_text,
-            from_=from_num,
-            to=to_num,
+            from_=TWILIO_FROM,
+            to=phone,
         )
-        logger.info(f"✅ {channel} delivered to {phone}")
+        logger.info(f"✅ SMS delivered to {phone}")
 
     except Exception as e:
         logger.error(f"❌ Error processing SMS from {phone}: {e}", exc_info=True)
         try:
             twilio_client.messages.create(
                 body="something went wrong on my end. try again in a sec.",
-                from_=from_num,
-                to=to_num,
+                from_=TWILIO_FROM,
+                to=phone,
             )
         except Exception:
             logger.error(f"❌ Failed to send error message to {phone}")
 
 
-def schedule_followup(phone: str, minutes: int, is_whatsapp: bool = False):
+def schedule_followup(phone: str, minutes: int):
     """Schedule a one-time follow-up SMS."""
     from bot import guess_timezone
     from database import get_user_timezone
@@ -165,16 +161,13 @@ def schedule_followup(phone: str, minutes: int, is_whatsapp: bool = False):
     import random
     message = random.choice(followup_messages)
 
-    from_num = TWILIO_FROM_WA if is_whatsapp else TWILIO_FROM_SMS
-    to_num = f"whatsapp:{phone}" if is_whatsapp else phone
-
     def send_followup():
         try:
             logger.info(f"⏰ Follow-up firing for {phone}...")
             twilio_client.messages.create(
                 body=message,
-                from_=from_num,
-                to=to_num,
+                from_=TWILIO_FROM,
+                to=phone,
             )
             logger.info(f"✅ Follow-up sent to {phone}: \"{message}\"")
         except Exception as e:
@@ -197,6 +190,120 @@ def schedule_followup(phone: str, minutes: int, is_whatsapp: bool = False):
 def health():
     logger.info("💚 Health check OK")
     return "LockIn Bot is running 💪", 200
+
+
+# ═══════════════════════════════════════
+# TELEGRAM
+# ═══════════════════════════════════════
+
+@app.route("/telegram", methods=["POST"])
+def telegram_webhook():
+    """Receive Telegram updates via webhook."""
+    if not tg_bot:
+        return "Telegram not configured", 503
+    update = telebot.types.Update.de_json(request.get_json(force=True))
+    tg_bot.process_new_updates([update])
+    return "ok", 200
+
+
+if tg_bot:
+    @tg_bot.message_handler(commands=['start'])
+    def tg_start(message):
+        tg_bot.reply_to(message, "🔒 LockIn Bot here. i'm your accountability partner. text me anything — let's get to work.")
+
+    @tg_bot.message_handler(func=lambda m: True)
+    def tg_message(message):
+        chat_id = message.chat.id
+        body = message.text or ""
+        phone = f"tg_{chat_id}"
+
+        logger.info(f"📩 Telegram from {chat_id}: \"{body}\"")
+
+        # Send typing indicator
+        tg_bot.send_chat_action(chat_id, 'typing')
+
+        try:
+            ensure_user(phone)
+
+            # Auto-detect and save check-in
+            pillar = detect_checkin(body)
+            if pillar:
+                save_checkin(phone, pillar, "done")
+                logger.info(f"✅ Check-in detected: {pillar} for {phone}")
+
+            logger.info(f"🧠 Generating AI response for {phone}...")
+            reply_text = get_ai_response(phone, body)
+
+            # Check for reminder tag
+            remind_match = re.search(r'\[REMIND:(\d+)\]', reply_text)
+            if remind_match:
+                minutes = int(remind_match.group(1))
+                reply_text = re.sub(r'\s*\[REMIND:\d+\]', '', reply_text).strip()
+                schedule_telegram_followup(chat_id, phone, minutes)
+                logger.info(f"⏰ Scheduled Telegram follow-up for {phone} in {minutes} minutes")
+
+            reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
+
+            logger.info(f"📤 Telegram reply to {chat_id}: \"{reply_text}\"")
+            tg_bot.send_message(chat_id, reply_text)
+
+        except Exception as e:
+            logger.error(f"❌ Telegram error for {chat_id}: {e}", exc_info=True)
+            tg_bot.send_message(chat_id, "something went wrong on my end. try again in a sec.")
+
+
+def schedule_telegram_followup(chat_id: int, phone: str, minutes: int):
+    """Schedule a one-time Telegram follow-up."""
+    from bot import guess_timezone
+    from database import get_user_timezone
+    from zoneinfo import ZoneInfo
+
+    tz_name = get_user_timezone(phone) or guess_timezone(phone)
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("America/Montreal")
+
+    run_at = datetime.now(tz) + timedelta(minutes=minutes)
+    job_id = f"tg_followup_{chat_id}_{uuid.uuid4().hex[:8]}"
+
+    import random
+    followup_messages = [
+        "⏰ Time's up! What did you get done? Check in with me.",
+        "⏰ Yo, you asked me to check in. So... did you do the thing?",
+        "⏰ Reminder fired. No excuses — tell me what's done.",
+        "⏰ I'm back. You better have something to report. 💪",
+    ]
+    message = random.choice(followup_messages)
+
+    def send_followup():
+        try:
+            logger.info(f"⏰ Telegram follow-up firing for {chat_id}...")
+            tg_bot.send_message(chat_id, message)
+            logger.info(f"✅ Telegram follow-up sent to {chat_id}")
+        except Exception as e:
+            logger.error(f"❌ Telegram follow-up FAILED for {chat_id}: {e}", exc_info=True)
+
+    scheduler = get_scheduler()
+    if scheduler:
+        scheduler.add_job(send_followup, trigger='date', run_date=run_at, id=job_id)
+        logger.info(f"📅 Telegram follow-up {job_id} scheduled for {run_at.strftime('%H:%M:%S')}")
+
+
+def setup_telegram_webhook(base_url: str):
+    """Set Telegram webhook to point to our server."""
+    if not tg_bot:
+        logger.info("⚠️ Telegram not configured (no TELEGRAM_BOT_TOKEN)")
+        return
+    webhook_url = f"{base_url.rstrip('/')}/telegram"
+    try:
+        tg_bot.remove_webhook()
+        import time
+        time.sleep(1)
+        tg_bot.set_webhook(url=webhook_url)
+        logger.info(f"✅ Telegram webhook set to {webhook_url}")
+    except Exception as e:
+        logger.error(f"❌ Failed to set Telegram webhook: {e}", exc_info=True)
 
 
 @app.route("/voice", methods=["POST"])
