@@ -3,14 +3,15 @@ Description=LockIn Bot - Accountability SMS/Voice Bot
 After=network.target mysql.service
 
 [Service]
-User=www-data
-Group=www-data
+User=root
+Group=root
 WorkingDirectory=/var/www/lockinbot
 EnvironmentFile=/var/www/lockinbot/.env
-ExecStart=/var/www/lockinbot/venv/bin/gunicorn --workers 1 --bind unix:lockinbot.sock --timeout 120 wsgi:app
+ExecStart=/var/www/lockinbot/venv/bin/gunicorn --workers 1 --bind 0.0.0.0:5000 --timeout 120 wsgi:app
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
+
 
