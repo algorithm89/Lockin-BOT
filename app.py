@@ -31,16 +31,6 @@ tts_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 twilio_client = TwilioClient(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
 TWILIO_FROM = os.getenv("TWILIO_PHONE_NUMBER")
 
-# Start the scheduler in this worker process
-_scheduler_started = False
-
-@app.before_request
-def _start_scheduler_once():
-    global _scheduler_started
-    if not _scheduler_started:
-        start_scheduler()
-        _scheduler_started = True
-        logger.info("🚀 Scheduler started in worker process")
 
 # Directory to store generated TTS audio files
 AUDIO_DIR = os.path.join(tempfile.gettempdir(), "lockinbot_audio")

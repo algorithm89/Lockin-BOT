@@ -1,6 +1,6 @@
 from app import app
 from database import init_db
+from scheduler import start_scheduler
 
 init_db()
-
-# Scheduler is started inside the app on first request — see app.py
+start_scheduler()

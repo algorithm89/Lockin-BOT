@@ -9,5 +9,5 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "--timeout", "120", "wsgi:app"]
+CMD ["gunicorn", "--workers", "1", "--worker-class", "gevent", "--bind", "0.0.0.0:5000", "--timeout", "120", "--preload", "wsgi:app"]
 
