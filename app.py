@@ -43,22 +43,11 @@ def detect_checkin(text: str) -> str | None:
     return None
 
 
-# Allowed phone numbers (add numbers to allow others)
-ALLOWED_NUMBERS = set(os.getenv("ALLOWED_NUMBERS", os.getenv("MY_PHONE_NUMBER", "")).split(","))
-
-
 @app.route("/sms", methods=["POST"])
 def incoming_sms():
     phone = request.form.get("From", "")
     body = request.form.get("Body", "").strip()
 
-    # Block unknown numbers
-    if phone not in ALLOWED_NUMBERS:
-        resp = MessagingResponse()
-        resp.message("🔒 This bot is private. Access denied.")
-        return str(resp), 200, {"Content-Type": "application/xml"}
-
-    ensure_user(phone)
 
     # Auto-detect and save check-in
     pillar = detect_checkin(body)
@@ -82,12 +71,6 @@ def health():
 def incoming_call():
     """Handle incoming voice calls — greet and start listening."""
     phone = request.form.get("From", "")
-
-    if phone not in ALLOWED_NUMBERS:
-        resp = VoiceResponse()
-        resp.say("This bot is private. Goodbye.")
-        resp.hangup()
-        return str(resp), 200, {"Content-Type": "application/xml"}
 
     ensure_user(phone)
 
