@@ -213,43 +213,56 @@ if tg_bot:
 
     @tg_bot.message_handler(func=lambda m: True)
     def tg_message(message):
-        chat_id = message.chat.id
-        body = message.text or ""
-        phone = f"tg_{chat_id}"
+        import threading
+        threading.Thread(
+            target=_process_telegram,
+            args=(message,),
+            daemon=True,
+        ).start()
 
-        logger.info(f"📩 Telegram from {chat_id}: \"{body}\"")
 
-        # Send typing indicator
-        tg_bot.send_chat_action(chat_id, 'typing')
+def _process_telegram(message):
+    """Background: generate AI response and send via Telegram."""
+    chat_id = message.chat.id
+    body = message.text or ""
+    phone = f"tg_{chat_id}"
 
+    logger.info(f"📩 Telegram from {chat_id}: \"{body}\"")
+
+    # Send typing indicator
+    tg_bot.send_chat_action(chat_id, 'typing')
+
+    try:
+        ensure_user(phone)
+
+        # Auto-detect and save check-in
+        pillar = detect_checkin(body)
+        if pillar:
+            save_checkin(phone, pillar, "done")
+            logger.info(f"✅ Check-in detected: {pillar} for {phone}")
+
+        logger.info(f"🧠 Generating AI response for {phone}...")
+        reply_text = get_ai_response(phone, body)
+
+        # Check for reminder tag
+        remind_match = re.search(r'\[REMIND:(\d+)\]', reply_text)
+        if remind_match:
+            minutes = int(remind_match.group(1))
+            reply_text = re.sub(r'\s*\[REMIND:\d+\]', '', reply_text).strip()
+            schedule_telegram_followup(chat_id, phone, minutes)
+            logger.info(f"⏰ Scheduled Telegram follow-up for {phone} in {minutes} minutes")
+
+        reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
+
+        logger.info(f"📤 Telegram reply to {chat_id}: \"{reply_text}\"")
+        tg_bot.send_message(chat_id, reply_text)
+
+    except Exception as e:
+        logger.error(f"❌ Telegram error for {chat_id}: {e}", exc_info=True)
         try:
-            ensure_user(phone)
-
-            # Auto-detect and save check-in
-            pillar = detect_checkin(body)
-            if pillar:
-                save_checkin(phone, pillar, "done")
-                logger.info(f"✅ Check-in detected: {pillar} for {phone}")
-
-            logger.info(f"🧠 Generating AI response for {phone}...")
-            reply_text = get_ai_response(phone, body)
-
-            # Check for reminder tag
-            remind_match = re.search(r'\[REMIND:(\d+)\]', reply_text)
-            if remind_match:
-                minutes = int(remind_match.group(1))
-                reply_text = re.sub(r'\s*\[REMIND:\d+\]', '', reply_text).strip()
-                schedule_telegram_followup(chat_id, phone, minutes)
-                logger.info(f"⏰ Scheduled Telegram follow-up for {phone} in {minutes} minutes")
-
-            reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
-
-            logger.info(f"📤 Telegram reply to {chat_id}: \"{reply_text}\"")
-            tg_bot.send_message(chat_id, reply_text)
-
-        except Exception as e:
-            logger.error(f"❌ Telegram error for {chat_id}: {e}", exc_info=True)
             tg_bot.send_message(chat_id, "something went wrong on my end. try again in a sec.")
+        except Exception:
+            pass
 
 
 def schedule_telegram_followup(chat_id: int, phone: str, minutes: int):
