@@ -146,3 +146,15 @@ def ensure_user(phone: str):
     conn.commit()
     cur.close()
     conn.close()
+
+
+def get_user_timezone(phone: str) -> str | None:
+    """Get the user's stored timezone, or None."""
+    conn = get_db()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT timezone FROM users WHERE phone = %s", (phone,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row["timezone"] if row and row["timezone"] else None
+
