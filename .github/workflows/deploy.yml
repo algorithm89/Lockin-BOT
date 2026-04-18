@@ -13,14 +13,40 @@ jobs:
           cd ~/Lockin-BOT
           git pull origin main
 
+      - name: Create .env from secrets
+        run: |
+          cd ~/Lockin-BOT
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" > .env
+          echo "DB_HOST=${{ secrets.DB_HOST }}" >> .env
+          echo "DB_PORT=${{ secrets.DB_PORT }}" >> .env
+          echo "DB_USER=${{ secrets.DB_USER }}" >> .env
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+          echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
+          echo "TWILIO_ACCOUNT_SID=${{ secrets.TWILIO_ACCOUNT_SID }}" >> .env
+          echo "TWILIO_AUTH_TOKEN=${{ secrets.TWILIO_AUTH_TOKEN }}" >> .env
+          echo "TWILIO_PHONE_NUMBER=${{ secrets.TWILIO_PHONE_NUMBER }}" >> .env
+          echo "MY_PHONE_NUMBER=${{ secrets.MY_PHONE_NUMBER }}" >> .env
+
       - name: Rebuild and restart
         run: |
           cd ~/Lockin-BOT
           docker compose down
           docker compose up -d --build
 
+      - name: Cleanup .env
+        if: always()
+        run: rm -f ~/Lockin-BOT/.env
+
       - name: Show logs
         run: docker logs lockinbot --tail 20
+
+      - name: Test connections
+        run: |
+          sleep 5
+          docker exec lockinbot python test_connections.py
+
+
+
 
 
 
