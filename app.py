@@ -2,21 +2,34 @@ from __future__ import annotations
 import os
 import re
 import uuid
+import logging
 import tempfile
+from datetime import datetime, timedelta
 from flask import Flask, request, send_from_directory
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse, Gather
+from twilio.rest import Client as TwilioClient
 from dotenv import load_dotenv
 from openai import OpenAI
 
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger("lockinbot")
+
 from database import init_db, ensure_user, save_checkin
 from bot import get_ai_response
-from scheduler import start_scheduler
+from scheduler import start_scheduler, get_scheduler
 
 app = Flask(__name__)
 tts_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+twilio_client = TwilioClient(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+TWILIO_FROM = os.getenv("TWILIO_PHONE_NUMBER")
 
 # Directory to store generated TTS audio files
 AUDIO_DIR = os.path.join(tempfile.gettempdir(), "lockinbot_audio")
@@ -48,22 +61,67 @@ def incoming_sms():
     phone = request.form.get("From", "")
     body = request.form.get("Body", "").strip()
 
+    logger.info(f"📩 SMS from {phone}: \"{body}\"")
+
+    ensure_user(phone)
 
     # Auto-detect and save check-in
     pillar = detect_checkin(body)
     if pillar:
         save_checkin(phone, pillar, "done")
+        logger.info(f"✅ Check-in detected: {pillar} for {phone}")
 
     # Get AI response
+    logger.info(f"🧠 Generating AI response for {phone}...")
     reply_text = get_ai_response(phone, body)
+
+    # Check for reminder tag [REMIND:X]
+    remind_match = re.search(r'\[REMIND:(\d+)\]', reply_text)
+    if remind_match:
+        minutes = int(remind_match.group(1))
+        reply_text = re.sub(r'\s*\[REMIND:\d+\]', '', reply_text).strip()
+        schedule_followup(phone, minutes)
+        logger.info(f"⏰ Scheduled follow-up for {phone} in {minutes} minutes")
+
+    logger.info(f"📤 Reply to {phone}: \"{reply_text}\"")
 
     resp = MessagingResponse()
     resp.message(reply_text)
     return str(resp), 200, {"Content-Type": "application/xml"}
 
 
+def schedule_followup(phone: str, minutes: int):
+    """Schedule a one-time follow-up SMS."""
+    from bot import get_ai_response as ai_reply
+    run_at = datetime.now() + timedelta(minutes=minutes)
+    job_id = f"followup_{phone}_{uuid.uuid4().hex[:8]}"
+
+    def send_followup():
+        logger.info(f"⏰ Sending follow-up to {phone}")
+        followup_text = ai_reply(phone, "[SYSTEM: This is a scheduled follow-up. Check in on the user — ask what they've done, hold them accountable. Be natural, don't mention this is automated.]")
+        # Remove any nested remind tags
+        followup_text = re.sub(r'\s*\[REMIND:\d+\]', '', followup_text).strip()
+        twilio_client.messages.create(
+            body=followup_text,
+            from_=TWILIO_FROM,
+            to=phone,
+        )
+        logger.info(f"✅ Follow-up sent to {phone}: \"{followup_text}\"")
+
+    scheduler = get_scheduler()
+    if scheduler:
+        scheduler.add_job(
+            send_followup,
+            trigger='date',
+            run_date=run_at,
+            id=job_id,
+        )
+        logger.info(f"📅 Follow-up job {job_id} scheduled for {run_at.strftime('%H:%M:%S')}")
+
+
 @app.route("/health", methods=["GET"])
 def health():
+    logger.info("💚 Health check OK")
     return "LockIn Bot is running 💪", 200
 
 
