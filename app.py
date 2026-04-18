@@ -92,34 +92,31 @@ def incoming_sms():
 
 def schedule_followup(phone: str, minutes: int):
     """Schedule a one-time follow-up SMS."""
-    from bot import get_ai_response as ai_reply
     run_at = datetime.now() + timedelta(minutes=minutes)
     job_id = f"followup_{phone}_{uuid.uuid4().hex[:8]}"
+
+    # Pre-generate follow-up messages
+    followup_messages = [
+        "⏰ Time's up! What did you get done? Check in with me.",
+        "⏰ Hey, this is your reminder. Lock in — what's the update?",
+        "⏰ Yo, you asked me to check in. So... did you do the thing?",
+        "⏰ Reminder fired. No excuses — tell me what's done.",
+        "⏰ I'm back. You better have something to report. 💪",
+    ]
+    import random
+    message = random.choice(followup_messages)
 
     def send_followup():
         try:
             logger.info(f"⏰ Follow-up firing for {phone}...")
-            followup_text = ai_reply(phone, "[SYSTEM: This is a scheduled follow-up. Check in on the user — ask what they've done, hold them accountable. Be natural, don't mention this is automated.]")
-            # Remove any nested remind tags
-            followup_text = re.sub(r'\s*\[REMIND:\d+\]', '', followup_text).strip()
             twilio_client.messages.create(
-                body=followup_text,
+                body=message,
                 from_=TWILIO_FROM,
                 to=phone,
             )
-            logger.info(f"✅ Follow-up sent to {phone}: \"{followup_text}\"")
+            logger.info(f"✅ Follow-up sent to {phone}: \"{message}\"")
         except Exception as e:
             logger.error(f"❌ Follow-up FAILED for {phone}: {e}", exc_info=True)
-            # Send a simple fallback message
-            try:
-                twilio_client.messages.create(
-                    body="⏰ Hey, this is your reminder. What did you get done? Check in with me.",
-                    from_=TWILIO_FROM,
-                    to=phone,
-                )
-                logger.info(f"✅ Fallback follow-up sent to {phone}")
-            except Exception as e2:
-                logger.error(f"❌ Fallback also failed for {phone}: {e2}", exc_info=True)
 
     scheduler = get_scheduler()
     if scheduler:
