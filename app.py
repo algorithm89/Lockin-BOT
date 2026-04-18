@@ -97,16 +97,29 @@ def schedule_followup(phone: str, minutes: int):
     job_id = f"followup_{phone}_{uuid.uuid4().hex[:8]}"
 
     def send_followup():
-        logger.info(f"⏰ Sending follow-up to {phone}")
-        followup_text = ai_reply(phone, "[SYSTEM: This is a scheduled follow-up. Check in on the user — ask what they've done, hold them accountable. Be natural, don't mention this is automated.]")
-        # Remove any nested remind tags
-        followup_text = re.sub(r'\s*\[REMIND:\d+\]', '', followup_text).strip()
-        twilio_client.messages.create(
-            body=followup_text,
-            from_=TWILIO_FROM,
-            to=phone,
-        )
-        logger.info(f"✅ Follow-up sent to {phone}: \"{followup_text}\"")
+        try:
+            logger.info(f"⏰ Follow-up firing for {phone}...")
+            followup_text = ai_reply(phone, "[SYSTEM: This is a scheduled follow-up. Check in on the user — ask what they've done, hold them accountable. Be natural, don't mention this is automated.]")
+            # Remove any nested remind tags
+            followup_text = re.sub(r'\s*\[REMIND:\d+\]', '', followup_text).strip()
+            twilio_client.messages.create(
+                body=followup_text,
+                from_=TWILIO_FROM,
+                to=phone,
+            )
+            logger.info(f"✅ Follow-up sent to {phone}: \"{followup_text}\"")
+        except Exception as e:
+            logger.error(f"❌ Follow-up FAILED for {phone}: {e}", exc_info=True)
+            # Send a simple fallback message
+            try:
+                twilio_client.messages.create(
+                    body="⏰ Hey, this is your reminder. What did you get done? Check in with me.",
+                    from_=TWILIO_FROM,
+                    to=phone,
+                )
+                logger.info(f"✅ Fallback follow-up sent to {phone}")
+            except Exception as e2:
+                logger.error(f"❌ Fallback also failed for {phone}: {e2}", exc_info=True)
 
     scheduler = get_scheduler()
     if scheduler:
@@ -117,6 +130,8 @@ def schedule_followup(phone: str, minutes: int):
             id=job_id,
         )
         logger.info(f"📅 Follow-up job {job_id} scheduled for {run_at.strftime('%H:%M:%S')}")
+    else:
+        logger.error(f"❌ Scheduler not available! Cannot schedule follow-up for {phone}")
 
 
 @app.route("/health", methods=["GET"])
