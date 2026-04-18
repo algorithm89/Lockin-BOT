@@ -29,7 +29,8 @@ from scheduler import start_scheduler, get_scheduler
 app = Flask(__name__)
 tts_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 twilio_client = TwilioClient(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
-TWILIO_FROM = os.getenv("TWILIO_PHONE_NUMBER")
+TWILIO_FROM_SMS = os.getenv("TWILIO_PHONE_NUMBER")
+TWILIO_FROM_WA  = f"whatsapp:{os.getenv('TWILIO_PHONE_NUMBER')}"
 
 
 # Directory to store generated TTS audio files
@@ -60,16 +61,21 @@ def detect_checkin(text: str) -> str | None:
 @app.route("/sms", methods=["POST"])
 def incoming_sms():
     """Acknowledge Twilio immediately, process and reply in background."""
-    phone = request.form.get("From", "")
+    raw_from = request.form.get("From", "")
     body = request.form.get("Body", "").strip()
 
-    logger.info(f"📩 SMS from {phone}: \"{body}\"")
+    # Detect WhatsApp vs SMS
+    is_whatsapp = raw_from.startswith("whatsapp:")
+    phone = raw_from.replace("whatsapp:", "") if is_whatsapp else raw_from
+    channel = "WhatsApp" if is_whatsapp else "SMS"
+
+    logger.info(f"📩 {channel} from {phone}: \"{body}\"")
 
     # Process in background thread so Twilio never times out
     import threading
     threading.Thread(
         target=_process_and_reply,
-        args=(phone, body),
+        args=(phone, body, is_whatsapp),
         daemon=True,
     ).start()
 
@@ -78,8 +84,11 @@ def incoming_sms():
     return str(resp), 200, {"Content-Type": "application/xml"}
 
 
-def _process_and_reply(phone: str, body: str):
+def _process_and_reply(phone: str, body: str, is_whatsapp: bool = False):
     """Background: generate AI response and send via Twilio API."""
+    from_num = TWILIO_FROM_WA if is_whatsapp else TWILIO_FROM_SMS
+    to_num = f"whatsapp:{phone}" if is_whatsapp else phone
+    channel = "WhatsApp" if is_whatsapp else "SMS"
     try:
         ensure_user(phone)
 
@@ -98,35 +107,35 @@ def _process_and_reply(phone: str, body: str):
         if remind_match:
             minutes = int(remind_match.group(1))
             reply_text = re.sub(r'\s*\[REMIND:\d+\]', '', reply_text).strip()
-            schedule_followup(phone, minutes)
+            schedule_followup(phone, minutes, is_whatsapp)
             logger.info(f"⏰ Scheduled follow-up for {phone} in {minutes} minutes")
 
         # Strip any remaining tags
         reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
 
-        logger.info(f"📤 Reply to {phone}: \"{reply_text}\"")
+        logger.info(f"📤 {channel} reply to {phone}: \"{reply_text}\"")
 
         # Send reply via Twilio API (not TwiML)
         twilio_client.messages.create(
             body=reply_text,
-            from_=TWILIO_FROM,
-            to=phone,
+            from_=from_num,
+            to=to_num,
         )
-        logger.info(f"✅ SMS delivered to {phone}")
+        logger.info(f"✅ {channel} delivered to {phone}")
 
     except Exception as e:
         logger.error(f"❌ Error processing SMS from {phone}: {e}", exc_info=True)
         try:
             twilio_client.messages.create(
                 body="something went wrong on my end. try again in a sec.",
-                from_=TWILIO_FROM,
-                to=phone,
+                from_=from_num,
+                to=to_num,
             )
         except Exception:
             logger.error(f"❌ Failed to send error message to {phone}")
 
 
-def schedule_followup(phone: str, minutes: int):
+def schedule_followup(phone: str, minutes: int, is_whatsapp: bool = False):
     """Schedule a one-time follow-up SMS."""
     from bot import guess_timezone
     from database import get_user_timezone
@@ -156,13 +165,16 @@ def schedule_followup(phone: str, minutes: int):
     import random
     message = random.choice(followup_messages)
 
+    from_num = TWILIO_FROM_WA if is_whatsapp else TWILIO_FROM_SMS
+    to_num = f"whatsapp:{phone}" if is_whatsapp else phone
+
     def send_followup():
         try:
             logger.info(f"⏰ Follow-up firing for {phone}...")
             twilio_client.messages.create(
                 body=message,
-                from_=TWILIO_FROM,
-                to=phone,
+                from_=from_num,
+                to=to_num,
             )
             logger.info(f"✅ Follow-up sent to {phone}: \"{message}\"")
         except Exception as e:
