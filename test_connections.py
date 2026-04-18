@@ -71,6 +71,45 @@ except Exception as e:
     print(f"  ❌ Twilio failed: {e}")
     errors.append("Twilio")
 
+# 5. Test Telegram Bot
+print("\n🔍 Testing Telegram Bot...")
+tg_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+if not tg_token:
+    print("  ⚠️  TELEGRAM_BOT_TOKEN — not set (Telegram disabled)")
+else:
+    try:
+        import requests as req
+        resp = req.get(f"https://api.telegram.org/bot{tg_token}/getMe", timeout=10)
+        data = resp.json()
+        if data.get("ok"):
+            bot_info = data["result"]
+            print(f"  ✅ Telegram connected — @{bot_info['username']} (id: {bot_info['id']})")
+            # Check webhook
+            resp2 = req.get(f"https://api.telegram.org/bot{tg_token}/getWebhookInfo", timeout=10)
+            wh = resp2.json().get("result", {})
+            wh_url = wh.get("url", "")
+            if wh_url:
+                print(f"  🔗 Webhook: {wh_url}")
+                last_err = wh.get("last_error_message", "")
+                if last_err:
+                    print(f"  ⚠️  Last error: {last_err}")
+            else:
+                print("  ⚠️  No webhook set!")
+        else:
+            print(f"  ❌ Telegram failed: {data}")
+            errors.append("Telegram")
+    except Exception as e:
+        print(f"  ❌ Telegram failed: {e}")
+        errors.append("Telegram")
+
+# 6. Check BASE_URL
+print("\n🔍 Checking BASE_URL...")
+base_url = os.getenv("BASE_URL", "")
+if base_url:
+    print(f"  ✅ BASE_URL — {base_url}")
+else:
+    print("  ⚠️  BASE_URL — not set (Telegram webhook auto-setup disabled)")
+
 # Summary
 print("\n" + "=" * 40)
 if errors:
