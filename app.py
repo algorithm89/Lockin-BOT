@@ -31,6 +31,17 @@ tts_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 twilio_client = TwilioClient(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
 TWILIO_FROM = os.getenv("TWILIO_PHONE_NUMBER")
 
+# Start the scheduler in this worker process
+_scheduler_started = False
+
+@app.before_request
+def _start_scheduler_once():
+    global _scheduler_started
+    if not _scheduler_started:
+        start_scheduler()
+        _scheduler_started = True
+        logger.info("🚀 Scheduler started in worker process")
+
 # Directory to store generated TTS audio files
 AUDIO_DIR = os.path.join(tempfile.gettempdir(), "lockinbot_audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
@@ -92,7 +103,21 @@ def incoming_sms():
 
 def schedule_followup(phone: str, minutes: int):
     """Schedule a one-time follow-up SMS."""
-    run_at = datetime.now() + timedelta(minutes=minutes)
+    from bot import guess_timezone
+    from database import get_user_timezone
+    from zoneinfo import ZoneInfo
+
+    # Use the SAME timezone as the scheduler so the job fires at the right time
+    tz_name = get_user_timezone(phone) or guess_timezone(phone)
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("America/Montreal")
+
+    run_at = datetime.now(tz) + timedelta(minutes=minutes)
+    job_id = f"followup_{phone}_{uuid.uuid4().hex[:8]}"
+
+    logger.info(f"📅 Scheduling follow-up: now={datetime.now(tz).strftime('%H:%M:%S')} tz={tz_name} run_at={run_at.strftime('%H:%M:%S')}")
     job_id = f"followup_{phone}_{uuid.uuid4().hex[:8]}"
 
     # Pre-generate follow-up messages
