@@ -59,12 +59,28 @@ def detect_checkin(text: str) -> str | None:
 
 @app.route("/sms", methods=["POST"])
 def incoming_sms():
+    """Acknowledge Twilio immediately, process and reply in background."""
+    phone = request.form.get("From", "")
+    body = request.form.get("Body", "").strip()
+
+    logger.info(f"📩 SMS from {phone}: \"{body}\"")
+
+    # Process in background thread so Twilio never times out
+    import threading
+    threading.Thread(
+        target=_process_and_reply,
+        args=(phone, body),
+        daemon=True,
+    ).start()
+
+    # Return empty TwiML immediately — reply will be sent via Twilio API
+    resp = MessagingResponse()
+    return str(resp), 200, {"Content-Type": "application/xml"}
+
+
+def _process_and_reply(phone: str, body: str):
+    """Background: generate AI response and send via Twilio API."""
     try:
-        phone = request.form.get("From", "")
-        body = request.form.get("Body", "").strip()
-
-        logger.info(f"📩 SMS from {phone}: \"{body}\"")
-
         ensure_user(phone)
 
         # Auto-detect and save check-in
@@ -85,23 +101,29 @@ def incoming_sms():
             schedule_followup(phone, minutes)
             logger.info(f"⏰ Scheduled follow-up for {phone} in {minutes} minutes")
 
-        # Strip any remaining tags (PROFILE is handled in bot.py but just in case)
+        # Strip any remaining tags
         reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
 
         logger.info(f"📤 Reply to {phone}: \"{reply_text}\"")
 
-        resp = MessagingResponse()
-        resp.message(reply_text)
-        twiml = str(resp)
-        logger.info(f"📋 TwiML sent to Twilio: {twiml[:200]}")
-        return twiml, 200, {"Content-Type": "application/xml"}
+        # Send reply via Twilio API (not TwiML)
+        twilio_client.messages.create(
+            body=reply_text,
+            from_=TWILIO_FROM,
+            to=phone,
+        )
+        logger.info(f"✅ SMS delivered to {phone}")
 
     except Exception as e:
-        logger.error(f"❌ Error processing SMS: {e}", exc_info=True)
-        # Still return valid TwiML so Twilio doesn't retry
-        resp = MessagingResponse()
-        resp.message("something went wrong on my end. try again in a sec.")
-        return str(resp), 200, {"Content-Type": "application/xml"}
+        logger.error(f"❌ Error processing SMS from {phone}: {e}", exc_info=True)
+        try:
+            twilio_client.messages.create(
+                body="something went wrong on my end. try again in a sec.",
+                from_=TWILIO_FROM,
+                to=phone,
+            )
+        except Exception:
+            logger.error(f"❌ Failed to send error message to {phone}")
 
 
 def schedule_followup(phone: str, minutes: int):
