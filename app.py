@@ -59,39 +59,49 @@ def detect_checkin(text: str) -> str | None:
 
 @app.route("/sms", methods=["POST"])
 def incoming_sms():
-    phone = request.form.get("From", "")
-    body = request.form.get("Body", "").strip()
+    try:
+        phone = request.form.get("From", "")
+        body = request.form.get("Body", "").strip()
 
-    logger.info(f"📩 SMS from {phone}: \"{body}\"")
+        logger.info(f"📩 SMS from {phone}: \"{body}\"")
 
-    ensure_user(phone)
+        ensure_user(phone)
 
-    # Auto-detect and save check-in
-    pillar = detect_checkin(body)
-    if pillar:
-        save_checkin(phone, pillar, "done")
-        logger.info(f"✅ Check-in detected: {pillar} for {phone}")
+        # Auto-detect and save check-in
+        pillar = detect_checkin(body)
+        if pillar:
+            save_checkin(phone, pillar, "done")
+            logger.info(f"✅ Check-in detected: {pillar} for {phone}")
 
-    # Get AI response
-    logger.info(f"🧠 Generating AI response for {phone}...")
-    reply_text = get_ai_response(phone, body)
+        # Get AI response
+        logger.info(f"🧠 Generating AI response for {phone}...")
+        reply_text = get_ai_response(phone, body)
 
-    # Check for reminder tag [REMIND:X]
-    remind_match = re.search(r'\[REMIND:(\d+)\]', reply_text)
-    if remind_match:
-        minutes = int(remind_match.group(1))
-        reply_text = re.sub(r'\s*\[REMIND:\d+\]', '', reply_text).strip()
-        schedule_followup(phone, minutes)
-        logger.info(f"⏰ Scheduled follow-up for {phone} in {minutes} minutes")
+        # Check for reminder tag [REMIND:X]
+        remind_match = re.search(r'\[REMIND:(\d+)\]', reply_text)
+        if remind_match:
+            minutes = int(remind_match.group(1))
+            reply_text = re.sub(r'\s*\[REMIND:\d+\]', '', reply_text).strip()
+            schedule_followup(phone, minutes)
+            logger.info(f"⏰ Scheduled follow-up for {phone} in {minutes} minutes")
 
-    # Strip any remaining tags (PROFILE is handled in bot.py but just in case)
-    reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
+        # Strip any remaining tags (PROFILE is handled in bot.py but just in case)
+        reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
 
-    logger.info(f"📤 Reply to {phone}: \"{reply_text}\"")
+        logger.info(f"📤 Reply to {phone}: \"{reply_text}\"")
 
-    resp = MessagingResponse()
-    resp.message(reply_text)
-    return str(resp), 200, {"Content-Type": "application/xml"}
+        resp = MessagingResponse()
+        resp.message(reply_text)
+        twiml = str(resp)
+        logger.info(f"📋 TwiML sent to Twilio: {twiml[:200]}")
+        return twiml, 200, {"Content-Type": "application/xml"}
+
+    except Exception as e:
+        logger.error(f"❌ Error processing SMS: {e}", exc_info=True)
+        # Still return valid TwiML so Twilio doesn't retry
+        resp = MessagingResponse()
+        resp.message("something went wrong on my end. try again in a sec.")
+        return str(resp), 200, {"Content-Type": "application/xml"}
 
 
 def schedule_followup(phone: str, minutes: int):
