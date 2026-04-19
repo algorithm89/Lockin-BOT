@@ -196,34 +196,7 @@ def health():
 # TELEGRAM
 # ═══════════════════════════════════════
 
-@app.route("/telegram", methods=["POST"])
-def telegram_webhook():
-    """Receive Telegram updates via webhook."""
-    if not tg_bot:
-        return "Telegram not configured", 503
-    try:
-        json_data = request.get_json(force=True)
-        logger.info(f"📨 Telegram update keys: {list(json_data.keys())}")
-        update = telebot.types.Update.de_json(json_data)
-        logger.info(f"📨 Update id={update.update_id}, message={update.message is not None}, handlers={len(tg_bot.message_handlers)}")
-
-        if update.message and update.message.text:
-            # Process directly instead of relying on handler dispatch
-            import threading
-            threading.Thread(
-                target=_process_telegram,
-                args=(update.message,),
-                daemon=True,
-            ).start()
-            logger.info(f"📨 Dispatched to _process_telegram")
-        else:
-            logger.info(f"📨 No text message in update, skipping")
-    except Exception as e:
-        logger.error(f"❌ Telegram webhook error: {e}", exc_info=True)
-    return "ok", 200
-
-
-def schedule_telegram_followup(chat_id: int, phone: str, minutes: int):
+def _process_telegram(message):
     """Background: generate AI response and send via Telegram."""
     chat_id = message.chat.id
     body = message.text or ""
@@ -270,6 +243,27 @@ def schedule_telegram_followup(chat_id: int, phone: str, minutes: int):
             tg_bot.send_message(chat_id, "something went wrong on my end. try again in a sec.")
         except Exception:
             pass
+
+
+@app.route("/telegram", methods=["POST"])
+def telegram_webhook():
+    """Receive Telegram updates via webhook."""
+    if not tg_bot:
+        return "Telegram not configured", 503
+    try:
+        json_data = request.get_json(force=True)
+        update = telebot.types.Update.de_json(json_data)
+
+        if update.message and update.message.text:
+            import threading
+            threading.Thread(
+                target=_process_telegram,
+                args=(update.message,),
+                daemon=True,
+            ).start()
+    except Exception as e:
+        logger.error(f"❌ Telegram webhook error: {e}", exc_info=True)
+    return "ok", 200
 
 
 def schedule_telegram_followup(chat_id: int, phone: str, minutes: int):
