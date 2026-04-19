@@ -205,35 +205,36 @@ def telegram_webhook():
         json_data = request.get_json(force=True)
         logger.info(f"📨 Telegram update keys: {list(json_data.keys())}")
         update = telebot.types.Update.de_json(json_data)
-        logger.info(f"📨 Update id={update.update_id}, message={update.message is not None}")
-        tg_bot.process_new_updates([update])
+        logger.info(f"📨 Update id={update.update_id}, message={update.message is not None}, handlers={len(tg_bot.message_handlers)}")
+
+        if update.message and update.message.text:
+            # Process directly instead of relying on handler dispatch
+            import threading
+            threading.Thread(
+                target=_process_telegram,
+                args=(update.message,),
+                daemon=True,
+            ).start()
+            logger.info(f"📨 Dispatched to _process_telegram")
+        else:
+            logger.info(f"📨 No text message in update, skipping")
     except Exception as e:
         logger.error(f"❌ Telegram webhook error: {e}", exc_info=True)
     return "ok", 200
 
 
-if tg_bot:
-    @tg_bot.message_handler(commands=['start'])
-    def tg_start(message):
-        tg_bot.reply_to(message, "🔒 LockIn Bot here. i'm your accountability partner. text me anything — let's get to work.")
-
-    @tg_bot.message_handler(func=lambda m: True)
-    def tg_message(message):
-        import threading
-        threading.Thread(
-            target=_process_telegram,
-            args=(message,),
-            daemon=True,
-        ).start()
-
-
-def _process_telegram(message):
+def schedule_telegram_followup(chat_id: int, phone: str, minutes: int):
     """Background: generate AI response and send via Telegram."""
     chat_id = message.chat.id
     body = message.text or ""
     phone = f"tg_{chat_id}"
 
     logger.info(f"📩 Telegram from {chat_id}: \"{body}\"")
+
+    # Handle /start
+    if body.strip() == "/start":
+        tg_bot.send_message(chat_id, "🔒 LockIn Bot here. i'm your accountability partner. text me anything — let's get to work.")
+        return
 
     # Send typing indicator
     tg_bot.send_chat_action(chat_id, 'typing')
