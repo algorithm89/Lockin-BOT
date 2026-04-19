@@ -31,14 +31,24 @@ jobs:
           docker compose down || true
           docker compose up -d --build
 
-      - name: Cleanup .env
-        if: always()
-        run: rm -f .env
-
       - name: Test connections
         run: |
           sleep 5
           docker exec lockinbot python test_connections.py
+
+      - name: Set Telegram webhook
+        run: |
+          TOKEN=$(grep TELEGRAM_BOT_TOKEN .env 2>/dev/null | cut -d= -f2 || echo "")
+          BASE=$(grep BASE_URL .env 2>/dev/null | cut -d= -f2 || echo "")
+          if [ -n "$TOKEN" ] && [ -n "$BASE" ]; then
+            curl -s "https://api.telegram.org/bot${TOKEN}/setWebhook?url=${BASE}/telegram&drop_pending_updates=true"
+            echo ""
+            echo "Telegram webhook set"
+          fi
+
+      - name: Cleanup .env
+        if: always()
+        run: rm -f .env
 
       - name: Show logs
         run: docker logs lockinbot --tail 20
