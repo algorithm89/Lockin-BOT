@@ -41,7 +41,7 @@ jobs:
           TOKEN=$(grep TELEGRAM_BOT_TOKEN .env 2>/dev/null | cut -d= -f2 || echo "")
           BASE=$(grep BASE_URL .env 2>/dev/null | cut -d= -f2 || echo "")
           if [ -n "$TOKEN" ] && [ -n "$BASE" ]; then
-            curl -s "https://api.telegram.org/bot${TOKEN}/setWebhook?url=${BASE}/telegram&drop_pending_updates=true"
+            curl -s "https://api.telegram.org/bot${TOKEN}/setWebhook?url=${BASE}/telegram&ip_address=162.0.212.6&drop_pending_updates=true"
             echo ""
             echo "Telegram webhook set"
           fi

@@ -201,8 +201,13 @@ def telegram_webhook():
     """Receive Telegram updates via webhook."""
     if not tg_bot:
         return "Telegram not configured", 503
-    update = telebot.types.Update.de_json(request.get_json(force=True))
-    tg_bot.process_new_updates([update])
+    try:
+        json_data = request.get_json(force=True)
+        logger.info(f"📨 Telegram raw update: {json_data}")
+        update = telebot.types.Update.de_json(json_data)
+        tg_bot.process_new_updates([update])
+    except Exception as e:
+        logger.error(f"❌ Telegram webhook error: {e}", exc_info=True)
     return "ok", 200
 
 
