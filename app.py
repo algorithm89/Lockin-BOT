@@ -62,6 +62,26 @@ def detect_checkin(text: str) -> str | None:
     return None
 
 
+def extract_reminder_minutes(text: str) -> int | None:
+    """Extract reminder minutes from common user phrases like 'in 5 min' or 'remind me 10 minutes'."""
+    lower = (text or "").lower()
+    m = re.search(r"\bin\s*(\d{1,3})\s*(m|min|mins|minute|minutes)\b", lower)
+    if not m:
+        m = re.search(r"\bremind\s+me\s*(?:in\s*)?(\d{1,3})\s*(m|min|mins|minute|minutes)\b", lower)
+    if not m:
+        return None
+    minutes = int(m.group(1))
+    if 1 <= minutes <= 1440:
+        return minutes
+    return None
+
+
+def strip_internal_tags(text: str) -> str:
+    cleaned = re.sub(r'\s*\[REMIND:\d+\]', '', text or '').strip()
+    cleaned = re.sub(r'\s*\[PROFILE:.*?\]', '', cleaned, flags=re.DOTALL).strip()
+    return cleaned
+
+
 @app.route("/sms", methods=["POST"])
 def incoming_sms():
     """Acknowledge Twilio immediately, process and reply in background."""
@@ -100,14 +120,13 @@ def _process_and_reply(phone: str, body: str):
 
         # Check for reminder tag [REMIND:X]
         remind_match = re.search(r'\[REMIND:(\d+)\]', reply_text)
-        if remind_match:
-            minutes = int(remind_match.group(1))
-            reply_text = re.sub(r'\s*\[REMIND:\d+\]', '', reply_text).strip()
+        minutes = int(remind_match.group(1)) if remind_match else extract_reminder_minutes(body)
+        if minutes:
             schedule_followup(phone, minutes)
             logger.info(f"⏰ Scheduled follow-up for {phone} in {minutes} minutes")
 
         # Strip any remaining tags
-        reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
+        reply_text = strip_internal_tags(reply_text)
 
         logger.info(f"📤 Reply to {phone}: \"{reply_text}\"")
 
@@ -226,13 +245,12 @@ def _process_telegram(message):
 
         # Check for reminder tag
         remind_match = re.search(r'\[REMIND:(\d+)\]', reply_text)
-        if remind_match:
-            minutes = int(remind_match.group(1))
-            reply_text = re.sub(r'\s*\[REMIND:\d+\]', '', reply_text).strip()
+        minutes = int(remind_match.group(1)) if remind_match else extract_reminder_minutes(body)
+        if minutes:
             schedule_telegram_followup(chat_id, phone, minutes)
             logger.info(f"⏰ Scheduled Telegram follow-up for {phone} in {minutes} minutes")
 
-        reply_text = re.sub(r'\s*\[PROFILE:.*?\]', '', reply_text, flags=re.DOTALL).strip()
+        reply_text = strip_internal_tags(reply_text)
 
         logger.info(f"📤 Telegram reply to {chat_id}: \"{reply_text}\"")
         tg_bot.send_message(chat_id, reply_text)
@@ -299,9 +317,16 @@ def schedule_telegram_followup(chat_id: int, phone: str, minutes: int):
             logger.error(f"❌ Telegram follow-up FAILED for {chat_id}: {e}", exc_info=True)
 
     scheduler = get_scheduler()
-    if scheduler:
-        scheduler.add_job(send_followup, trigger='date', run_date=run_at, id=job_id)
-        logger.info(f"📅 Telegram follow-up {job_id} scheduled for {run_at.strftime('%H:%M:%S')}")
+    if not scheduler:
+        logger.warning("⚠️ Scheduler not started. Attempting to start it now for Telegram follow-up...")
+        try:
+            scheduler = start_scheduler()
+        except Exception as e:
+            logger.error(f"❌ Could not start scheduler for Telegram follow-up: {e}", exc_info=True)
+            return
+
+    scheduler.add_job(send_followup, trigger='date', run_date=run_at, id=job_id)
+    logger.info(f"📅 Telegram follow-up {job_id} scheduled for {run_at.strftime('%H:%M:%S')}")
 
 
 def setup_telegram_webhook(base_url: str):
