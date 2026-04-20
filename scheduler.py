@@ -14,8 +14,10 @@ _scheduler_instance = None
 
 
 def get_scheduler():
-    """Return the running scheduler instance."""
-    return _scheduler_instance
+    """Return the running scheduler instance, or None if stale/stopped."""
+    if _scheduler_instance and _scheduler_instance.running:
+        return _scheduler_instance
+    return None
 
 twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
 FROM = os.getenv("TWILIO_PHONE_NUMBER")
@@ -74,6 +76,9 @@ def check_and_remind(time_key: str):
 
 def start_scheduler():
     global _scheduler_instance
+    if _scheduler_instance and _scheduler_instance.running:
+        return _scheduler_instance
+
     tz_name = (get_user_timezone(TO) if TO else None) or guess_timezone(TO or "")
     logger.info(f"⏰ Starting scheduler with timezone: {tz_name}")
     scheduler = BackgroundScheduler(timezone=tz_name)

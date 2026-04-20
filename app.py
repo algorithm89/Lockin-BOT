@@ -4,6 +4,7 @@ import re
 import uuid
 import logging
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from flask import Flask, request, send_from_directory
 from twilio.twiml.messaging_response import MessagingResponse
@@ -35,6 +36,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 # ── Telegram Bot ──
 import telebot
 tg_bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=True) if TELEGRAM_TOKEN else None
+WORKER_POOL = ThreadPoolExecutor(max_workers=int(os.getenv("MESSAGE_WORKERS", "8")))
 
 
 # Directory to store generated TTS audio files
@@ -90,13 +92,8 @@ def incoming_sms():
 
     logger.info(f"📩 SMS from {phone}: \"{body}\"")
 
-    # Process in background thread so Twilio never times out
-    import threading
-    threading.Thread(
-        target=_process_and_reply,
-        args=(phone, body),
-        daemon=True,
-    ).start()
+    # Process in background worker so Twilio never times out
+    WORKER_POOL.submit(_process_and_reply, phone, body)
 
     # Return empty TwiML immediately — reply will be sent via Twilio API
     resp = MessagingResponse()
@@ -247,8 +244,11 @@ def _process_telegram(message):
         remind_match = re.search(r'\[REMIND:(\d+)\]', reply_text)
         minutes = int(remind_match.group(1)) if remind_match else extract_reminder_minutes(body)
         if minutes:
-            schedule_telegram_followup(chat_id, phone, minutes)
-            logger.info(f"⏰ Scheduled Telegram follow-up for {phone} in {minutes} minutes")
+            scheduled = schedule_telegram_followup(chat_id, phone, minutes)
+            if scheduled:
+                logger.info(f"⏰ Scheduled Telegram follow-up for {phone} in {minutes} minutes")
+            else:
+                logger.warning(f"⚠️ Telegram follow-up NOT scheduled for {phone}")
 
         reply_text = strip_internal_tags(reply_text)
 
@@ -273,18 +273,13 @@ def telegram_webhook():
         update = telebot.types.Update.de_json(json_data)
 
         if update.message and update.message.text:
-            import threading
-            threading.Thread(
-                target=_process_telegram,
-                args=(update.message,),
-                daemon=True,
-            ).start()
+            WORKER_POOL.submit(_process_telegram, update.message)
     except Exception as e:
         logger.error(f"❌ Telegram webhook error: {e}", exc_info=True)
     return "ok", 200
 
 
-def schedule_telegram_followup(chat_id: int, phone: str, minutes: int):
+def schedule_telegram_followup(chat_id: int, phone: str, minutes: int) -> bool:
     """Schedule a one-time Telegram follow-up."""
     from bot import guess_timezone
     from database import get_user_timezone
@@ -323,10 +318,15 @@ def schedule_telegram_followup(chat_id: int, phone: str, minutes: int):
             scheduler = start_scheduler()
         except Exception as e:
             logger.error(f"❌ Could not start scheduler for Telegram follow-up: {e}", exc_info=True)
-            return
+            return False
 
-    scheduler.add_job(send_followup, trigger='date', run_date=run_at, id=job_id)
-    logger.info(f"📅 Telegram follow-up {job_id} scheduled for {run_at.strftime('%H:%M:%S')}")
+    try:
+        scheduler.add_job(send_followup, trigger='date', run_date=run_at, id=job_id)
+        logger.info(f"📅 Telegram follow-up {job_id} scheduled for {run_at.strftime('%H:%M:%S')}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Could not enqueue Telegram follow-up {job_id}: {e}", exc_info=True)
+        return False
 
 
 def setup_telegram_webhook(base_url: str):

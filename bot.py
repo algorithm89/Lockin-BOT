@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from openai import OpenAI
@@ -7,6 +8,9 @@ from database import get_recent_messages, get_todays_checkins, save_message, get
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 logger = logging.getLogger("lockinbot")
+MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "12"))
+MAX_REPLY_TOKENS = int(os.getenv("MAX_REPLY_TOKENS", "140"))
 
 SYSTEM_PROMPT = """You're LockIn — not a bot, not an app. You're that one friend everyone wishes they had. The one who genuinely gives a shit. The one who'll sit with you at 3am when your head is loud, but will also tell you to stop being a lazy bitch when you're dodging your responsibilities. You're equal parts therapist, drill sergeant, and best friend.
 
@@ -163,7 +167,7 @@ def get_ai_response(phone: str, user_message: str) -> str:
     time_str = now.strftime("%A, %B %d, %Y at %H:%M")
 
     # Build context
-    history = get_recent_messages(phone, limit=20)
+    history = get_recent_messages(phone, limit=HISTORY_LIMIT)
     checkins = get_todays_checkins(phone)
 
     checkin_summary = "No check-ins yet today."
@@ -190,12 +194,14 @@ def get_ai_response(phone: str, user_message: str) -> str:
 
     messages = [{"role": "system", "content": system}] + history
 
+    started = time.perf_counter()
     response = client.chat.completions.create(
-        model="gpt-4.1",
+        model=MODEL_NAME,
         messages=messages,
-        max_tokens=200,
+        max_tokens=MAX_REPLY_TOKENS,
         temperature=0.8,
     )
+    logger.info(f"⚡ OpenAI latency for {phone}: {(time.perf_counter() - started):.2f}s (model={MODEL_NAME}, history={HISTORY_LIMIT}, max_tokens={MAX_REPLY_TOKENS})")
 
     reply = response.choices[0].message.content.strip()
 

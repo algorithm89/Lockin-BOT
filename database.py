@@ -106,6 +106,10 @@ def init_db():
             )
         """)
 
+        # Hot-path indexes for faster message/check-in lookups.
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_phone_id ON messages (phone, id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_checkins_phone_created_at ON check_ins (phone, created_at)")
+
         conn.commit()
         cur.close()
 
@@ -136,7 +140,8 @@ def get_todays_checkins(phone: str) -> list[dict]:
         cur = conn.cursor(dictionary=True)
         cur.execute(
             "SELECT category, status, note, created_at FROM check_ins "
-            "WHERE phone = %s AND DATE(created_at) = CURDATE() ORDER BY created_at",
+            "WHERE phone = %s AND created_at >= CURDATE() "
+            "AND created_at < (CURDATE() + INTERVAL 1 DAY) ORDER BY created_at",
             (phone,)
         )
         rows = cur.fetchall()
