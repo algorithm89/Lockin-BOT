@@ -26,6 +26,22 @@ jobs:
           echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
           echo "BASE_URL=${{ secrets.BASE_URL }}" >> .env
 
+      - name: Validate required env vars
+        run: |
+          required=(OPENAI_API_KEY DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_PHONE_NUMBER)
+          missing=0
+          for key in "${required[@]}"; do
+            value=$(grep -E "^${key}=" .env | cut -d= -f2- || true)
+            if [ -z "$value" ]; then
+              echo "Missing or empty: $key"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Env validation failed. Check GitHub secrets."
+            exit 1
+          fi
+
       - name: Deploy
         run: |
           docker compose down || true

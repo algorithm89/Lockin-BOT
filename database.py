@@ -7,12 +7,28 @@ from mysql.connector import pooling
 logger = logging.getLogger("lockinbot")
 
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "localhost"),
+    "host": os.getenv("DB_HOST") or "localhost",
     "port": int(os.getenv("DB_PORT") or "3306"),
-    "user": os.getenv("DB_USER", "root"),
-    "password": os.getenv("DB_PASSWORD", ""),
-    "database": os.getenv("DB_NAME", "lockinbot"),
+    "user": os.getenv("DB_USER") or "",
+    "password": os.getenv("DB_PASSWORD") or "",
+    "database": os.getenv("DB_NAME") or "lockinbot",
 }
+
+
+def _validate_db_config():
+    missing = []
+    if not DB_CONFIG["host"]:
+        missing.append("DB_HOST")
+    if not DB_CONFIG["user"]:
+        missing.append("DB_USER")
+    if not DB_CONFIG["database"]:
+        missing.append("DB_NAME")
+    if missing:
+        raise RuntimeError(
+            f"Missing DB environment variables: {', '.join(missing)}. "
+            "Check your .env / GitHub secrets and docker-compose env wiring."
+        )
+
 
 pool = None
 
@@ -44,6 +60,7 @@ def get_db():
 
 def init_db():
     """Create the database (if needed) and all tables."""
+    _validate_db_config()
     cfg = {k: v for k, v in DB_CONFIG.items() if k != "database"}
     conn = mysql.connector.connect(**cfg)
     cur = conn.cursor()
