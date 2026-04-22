@@ -198,7 +198,7 @@ def get_ai_response(phone: str, user_message: str) -> str:
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=messages,
-        max_tokens=MAX_REPLY_TOKENS,
+        max_completion_tokens=MAX_REPLY_TOKENS,
         temperature=0.8,
     )
     logger.info(f"⚡ OpenAI latency for {phone}: {(time.perf_counter() - started):.2f}s (model={MODEL_NAME}, history={HISTORY_LIMIT}, max_tokens={MAX_REPLY_TOKENS})")

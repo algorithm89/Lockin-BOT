@@ -124,8 +124,14 @@ def init_db():
         """)
 
         # Hot-path indexes for faster message/check-in lookups.
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_phone_id ON messages (phone, id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_checkins_phone_created_at ON check_ins (phone, created_at)")
+        for sql in [
+            "CREATE INDEX idx_messages_phone_id ON messages (phone, id)",
+            "CREATE INDEX idx_checkins_phone_created_at ON check_ins (phone, created_at)",
+        ]:
+            try:
+                cur.execute(sql)
+            except Exception:
+                pass  # Index already exists
 
         conn.commit()
         cur.close()
