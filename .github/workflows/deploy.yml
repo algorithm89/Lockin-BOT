@@ -25,6 +25,7 @@ jobs:
           echo "MY_PHONE_NUMBER=${{ secrets.MY_PHONE_NUMBER }}" >> .env
           echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
           echo "BASE_URL=${{ secrets.BASE_URL }}" >> .env
+          echo "WEBHOOK_IP=${{ secrets.WEBHOOK_IP }}" >> .env
 
       - name: Validate required env vars
         run: |
