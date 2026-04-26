@@ -33,6 +33,9 @@ tg_bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=True) if TELEGRAM_TOKEN else N
 
 WORKER_POOL = ThreadPoolExecutor(max_workers=int(os.getenv("MESSAGE_WORKERS", "8")))
 
+# ── Human Verification ──
+VERIFIED_USERS: set[int] = set()  # chat_ids that passed the verification tap
+
 # Auto-detect check-in keywords
 PILLAR_KEYWORDS = {
     "sleep":    ["sleep", "slept", "bed", "woke", "wake"],
@@ -95,9 +98,30 @@ def _process_telegram(message):
     # Register this user as the Telegram reminder target
     set_telegram_sender(tg_bot, chat_id)
 
-    # Handle /start
+    # Handle /start — send verification button
     if body.strip() == "/start":
-        tg_bot.send_message(chat_id, "🔒 LockIn Bot here. i'm your accountability partner. text me anything — let's get to work.")
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.add(telebot.types.InlineKeyboardButton(
+            "✅ I'm a human, let me in", callback_data="verify_human"
+        ))
+        tg_bot.send_message(
+            chat_id,
+            "👋 Welcome to LockIn Bot!\nBefore we start — tap the button below to verify you're human.",
+            reply_markup=markup
+        )
+        return
+
+    # Gate: must verify first
+    if chat_id not in VERIFIED_USERS:
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.add(telebot.types.InlineKeyboardButton(
+            "✅ I'm a human, let me in", callback_data="verify_human"
+        ))
+        tg_bot.send_message(
+            chat_id,
+            "⚠️ Please verify you're human first by tapping the button below.",
+            reply_markup=markup
+        )
         return
 
     # Send typing indicator
@@ -146,6 +170,18 @@ def telegram_webhook():
     try:
         json_data = request.get_json(force=True)
         update = telebot.types.Update.de_json(json_data)
+
+        if update.callback_query:
+            cb = update.callback_query
+            if cb.data == "verify_human":
+                VERIFIED_USERS.add(cb.from_user.id)
+                tg_bot.answer_callback_query(cb.id, "✅ Verified!")
+                tg_bot.edit_message_text(
+                    "✅ You're verified! 🔒 LockIn Bot here — your accountability partner.\nText me anything. Let's get to work.",
+                    chat_id=cb.message.chat.id,
+                    message_id=cb.message.message_id
+                )
+            return "ok", 200
 
         if update.message and update.message.text:
             WORKER_POOL.submit(_process_telegram, update.message)
@@ -223,8 +259,11 @@ def setup_telegram_webhook(base_url: str):
         logger.error(f"❌ Failed to set Telegram webhook: {e}", exc_info=True)
 
 
+
+
 if __name__ == "__main__":
     init_db()
     start_scheduler()
     print("🔒 LockIn Bot is running!")
     app.run(host="0.0.0.0", port=5000, debug=False)
+
