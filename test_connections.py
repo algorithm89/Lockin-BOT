@@ -1,4 +1,4 @@
-"""Test all connections: MySQL, OpenAI, Twilio."""
+"""Test all connections: MySQL, OpenAI, Telegram."""
 import os
 import sys
 from dotenv import load_dotenv
@@ -9,15 +9,15 @@ errors = []
 
 # 1. Check env vars
 print("🔍 Checking environment variables...")
-required = ["OPENAI_API_KEY", "DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME",
-            "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER", "MY_PHONE_NUMBER"]
+required = ["OPENAI_API_KEY", "DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"]
 for var in required:
     val = os.getenv(var)
     if not val or val.startswith("your_"):
         print(f"  ❌ {var} — missing or placeholder")
         errors.append(var)
     else:
-        print(f"  ✅ {var} — set ({val[:8]}...)")
+        masked = "***" if var in ("DB_USER", "DB_PASSWORD", "DB_NAME") else val[:8]
+        print(f"  ✅ {var} — set ({masked}...)")
 
 # 2. Test MySQL
 print("\n🔍 Testing MySQL connection...")
@@ -35,7 +35,7 @@ try:
     cur.fetchone()
     cur.execute("SHOW TABLES")
     tables = [t[0] for t in cur.fetchall()]
-    print(f"  ✅ MySQL connected — database: {os.getenv('DB_NAME')}")
+    print(f"  ✅ MySQL connected — database: ***")
     print(f"  📋 Tables: {', '.join(tables) if tables else 'none (will be created on first run)'}")
     cur.close()
     conn.close()
@@ -59,19 +59,7 @@ except Exception as e:
     print(f"  ❌ OpenAI failed: {e}")
     errors.append("OpenAI")
 
-# 4. Test Twilio
-print("\n🔍 Testing Twilio credentials...")
-try:
-    from twilio.rest import Client
-    client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
-    account = client.api.accounts(os.getenv("TWILIO_ACCOUNT_SID")).fetch()
-    print(f"  ✅ Twilio connected — account: {account.friendly_name}, status: {account.status}")
-    print(f"  📱 From: {os.getenv('TWILIO_PHONE_NUMBER')} → To: {os.getenv('MY_PHONE_NUMBER')}")
-except Exception as e:
-    print(f"  ❌ Twilio failed: {e}")
-    errors.append("Twilio")
-
-# 5. Test Telegram Bot
+# 4. Test Telegram Bot
 print("\n🔍 Testing Telegram Bot...")
 tg_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
 if not tg_token:
@@ -83,13 +71,12 @@ else:
         data = resp.json()
         if data.get("ok"):
             bot_info = data["result"]
-            print(f"  ✅ Telegram connected — @{bot_info['username']} (id: {bot_info['id']})")
-            # Check webhook
+            print(f"  ✅ Telegram connected — @{bot_info['username']} (id: {str(bot_info['id'])[:6]}***)")
             resp2 = req.get(f"https://api.telegram.org/bot{tg_token}/getWebhookInfo", timeout=10)
             wh = resp2.json().get("result", {})
             wh_url = wh.get("url", "")
             if wh_url:
-                print(f"  🔗 Webhook: {wh_url}")
+                print(f"  🔗 Webhook: ***/{wh_url.split('/')[-1]}")
                 last_err = wh.get("last_error_message", "")
                 if last_err:
                     print(f"  ⚠️  Last error: {last_err}")
@@ -102,11 +89,11 @@ else:
         print(f"  ❌ Telegram failed: {e}")
         errors.append("Telegram")
 
-# 6. Check BASE_URL
+# 5. Check BASE_URL
 print("\n🔍 Checking BASE_URL...")
 base_url = os.getenv("BASE_URL", "")
 if base_url:
-    print(f"  ✅ BASE_URL — {base_url}")
+    print(f"  ✅ BASE_URL — ***")
 else:
     print("  ⚠️  BASE_URL — not set (Telegram webhook auto-setup disabled)")
 
