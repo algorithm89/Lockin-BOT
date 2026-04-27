@@ -176,12 +176,26 @@ def telegram_webhook():
                 phone = f"tg_{cb.from_user.id}"
                 ensure_user(phone)
                 set_telegram_verified(phone, True)
-                tg_bot.answer_callback_query(cb.id, "✅ Verified!")
-                tg_bot.edit_message_text(
-                    "✅ You're verified! 🔒 LockIn Bot here — your accountability partner.\nText me anything. Let's get to work.",
-                    chat_id=cb.message.chat.id,
-                    message_id=cb.message.message_id
-                )
+                # answer_callback_query can fail if the query is older than ~60s — ignore it
+                try:
+                    tg_bot.answer_callback_query(cb.id, "✅ Verified!")
+                except Exception:
+                    pass
+                try:
+                    tg_bot.edit_message_text(
+                        "✅ You're verified! 🔒 LockIn Bot here — your accountability partner.\nText me anything. Let's get to work.",
+                        chat_id=cb.message.chat.id,
+                        message_id=cb.message.message_id
+                    )
+                except Exception:
+                    # Message may already be edited or deleted — send a fresh message instead
+                    try:
+                        tg_bot.send_message(
+                            cb.message.chat.id,
+                            "✅ You're verified! 🔒 LockIn Bot here — your accountability partner.\nText me anything. Let's get to work."
+                        )
+                    except Exception:
+                        pass
             return "ok", 200
 
         if update.message and update.message.text:
