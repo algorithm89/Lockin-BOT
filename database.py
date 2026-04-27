@@ -89,6 +89,12 @@ def init_db():
         except Exception:
             pass
 
+        # Add telegram_verified column if upgrading from older version
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN telegram_verified TINYINT(1) DEFAULT 0")
+        except Exception:
+            pass
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS goals (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -215,3 +221,22 @@ def update_user_profile(phone: str, profile: str):
         cur.execute("UPDATE users SET profile = %s WHERE phone = %s", (profile, phone))
         conn.commit()
         cur.close()
+
+
+def is_telegram_verified(phone: str) -> bool:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT telegram_verified FROM users WHERE phone = %s", (phone,))
+        row = cur.fetchone()
+        cur.close()
+    return bool(row and row[0])
+
+
+def set_telegram_verified(phone: str, verified: bool = True):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET telegram_verified = %s WHERE phone = %s",
+                    (1 if verified else 0, phone))
+        conn.commit()
+        cur.close()
+

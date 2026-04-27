@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lockinbot")
 
-from database import init_db, ensure_user, save_checkin
+from database import init_db, ensure_user, save_checkin, is_telegram_verified, set_telegram_verified
 from bot import get_ai_response
 from scheduler import start_scheduler, get_scheduler, set_telegram_sender
 
@@ -33,8 +33,6 @@ tg_bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=True) if TELEGRAM_TOKEN else N
 
 WORKER_POOL = ThreadPoolExecutor(max_workers=int(os.getenv("MESSAGE_WORKERS", "8")))
 
-# ── Human Verification ──
-VERIFIED_USERS: set[int] = set()  # chat_ids that passed the verification tap
 
 # Auto-detect check-in keywords
 PILLAR_KEYWORDS = {
@@ -112,7 +110,9 @@ def _process_telegram(message):
         return
 
     # Gate: must verify first
-    if chat_id not in VERIFIED_USERS:
+    phone = f"tg_{chat_id}"
+    ensure_user(phone)
+    if not is_telegram_verified(phone):
         markup = telebot.types.InlineKeyboardMarkup()
         markup.add(telebot.types.InlineKeyboardButton(
             "✅ I'm a human, let me in", callback_data="verify_human"
@@ -128,7 +128,6 @@ def _process_telegram(message):
     tg_bot.send_chat_action(chat_id, 'typing')
 
     try:
-        ensure_user(phone)
 
         # Auto-detect and save check-in
         pillar = detect_checkin(body)
@@ -174,7 +173,9 @@ def telegram_webhook():
         if update.callback_query:
             cb = update.callback_query
             if cb.data == "verify_human":
-                VERIFIED_USERS.add(cb.from_user.id)
+                phone = f"tg_{cb.from_user.id}"
+                ensure_user(phone)
+                set_telegram_verified(phone, True)
                 tg_bot.answer_callback_query(cb.id, "✅ Verified!")
                 tg_bot.edit_message_text(
                     "✅ You're verified! 🔒 LockIn Bot here — your accountability partner.\nText me anything. Let's get to work.",
